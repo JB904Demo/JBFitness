@@ -131,6 +131,8 @@ body::before{content:'';position:fixed;top:-40%;left:-20%;width:70%;height:70%;b
 .mv-log-left{font-size:13px;font-weight:600}
 .mv-log-sub{font-size:11px;color:var(--text3)}
 .mv-log-cal{color:var(--green);font-weight:600;font-size:13px}
+.mode-tab{flex:1;padding:7px 4px;border:none;background:none;color:var(--text3);font-size:11px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;border-radius:calc(var(--r-sm) - 2px);transition:all .15s;white-space:nowrap}
+.mode-tab.active{background:var(--bg2);color:var(--gold);box-shadow:0 1px 4px rgba(0,0,0,.3)}
 
 /* ── FORMS ── */
 .form-grp{margin-bottom:14px}
@@ -337,8 +339,48 @@ canvas{display:block;border-radius:var(--r-sm)}
     <div class="mv-btn" onclick="selectMv(this,'Ball Work')"><div class="mv-icon">⚽</div><div class="mv-name">Ball Work</div></div>
     <div class="mv-btn" onclick="selectMv(this,'Ab Work')"><div class="mv-icon">🔥</div><div class="mv-name">Ab Work</div></div>
   </div>
-  <div class="form-grp"><label class="form-lbl">Duration (minutes)</label><input class="form-input" type="number" id="mv-dur" placeholder="45" min="1"></div>
-  <div class="form-grp"><label class="form-lbl">Calories Burned</label><input class="form-input" type="number" id="mv-cal" placeholder="300" min="0"></div>
+
+  <!-- Entry mode toggle — only shows for walk types -->
+  <div id="walk-mode-toggle" style="display:none;margin-bottom:14px">
+    <div style="display:flex;background:var(--bg4);border-radius:var(--r-sm);padding:3px;gap:2px">
+      <button id="mode-manual-btn" class="mode-tab active" onclick="setMvMode('manual')">⏱ Duration + Calories</button>
+      <button id="mode-steps-btn" class="mode-tab" onclick="setMvMode('steps')">👟 Steps</button>
+      <button id="mode-miles-btn" class="mode-tab" onclick="setMvMode('miles')">📍 Miles</button>
+    </div>
+  </div>
+
+  <!-- MANUAL mode -->
+  <div id="mv-manual-inputs">
+    <div class="form-grp"><label class="form-lbl">Duration (minutes)</label><input class="form-input" type="number" id="mv-dur" placeholder="45" min="1"></div>
+    <div class="form-grp"><label class="form-lbl">Calories Burned</label><input class="form-input" type="number" id="mv-cal" placeholder="300" min="0"></div>
+  </div>
+
+  <!-- STEPS mode -->
+  <div id="mv-steps-inputs" style="display:none">
+    <div class="form-grp"><label class="form-lbl">Number of Steps</label><input class="form-input" type="number" id="mv-steps" placeholder="8000" min="1" oninput="calcStepCals()"></div>
+    <div class="card" id="steps-calc-card" style="margin-bottom:14px">
+      <div class="card-title">Calorie Estimate</div>
+      <div class="d-row"><span class="d-lbl">Steps</span><span class="d-val" id="steps-display">—</span></div>
+      <div class="d-row"><span class="d-lbl">Miles</span><span class="d-val" id="steps-miles">—</span></div>
+      <div class="d-row" style="border-top:1px solid var(--border2)"><span class="d-lbl" style="font-weight:600">Calories Burned</span><span class="d-val" id="steps-cals" style="color:var(--green);font-size:16px;font-weight:700">—</span></div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">Based on your pace: 2,485 steps/mile · 100 cal/mile</div>
+    </div>
+    <div class="form-grp"><label class="form-lbl">Duration (minutes) <span style="color:var(--text3);font-weight:400">optional</span></label><input class="form-input" type="number" id="mv-steps-dur" placeholder="30" min="1"></div>
+  </div>
+
+  <!-- MILES mode -->
+  <div id="mv-miles-inputs" style="display:none">
+    <div class="form-grp"><label class="form-lbl">Distance (miles)</label><input class="form-input" type="number" id="mv-miles" placeholder="2.5" min="0.1" step="0.1" oninput="calcMileCals()"></div>
+    <div class="card" id="miles-calc-card" style="margin-bottom:14px">
+      <div class="card-title">Calorie Estimate</div>
+      <div class="d-row"><span class="d-lbl">Miles</span><span class="d-val" id="miles-display">—</span></div>
+      <div class="d-row"><span class="d-lbl">Approx Steps</span><span class="d-val" id="miles-steps">—</span></div>
+      <div class="d-row" style="border-top:1px solid var(--border2)"><span class="d-lbl" style="font-weight:600">Calories Burned</span><span class="d-val" id="miles-cals" style="color:var(--green);font-size:16px;font-weight:700">—</span></div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">Based on your pace: 2,485 steps/mile · 100 cal/mile</div>
+    </div>
+    <div class="form-grp"><label class="form-lbl">Duration (minutes) <span style="color:var(--text3);font-weight:400">optional</span></label><input class="form-input" type="number" id="mv-miles-dur" placeholder="30" min="1"></div>
+  </div>
+
   <div id="mv-log-display"></div>
   <button class="btn-primary" onclick="saveMv()">Add Activity ✓</button>
 </section>
@@ -856,8 +898,51 @@ function closeScatter(){document.getElementById('scatter-ov').style.display='non
 // ═══════════════════════════════════════════════
 // MOVEMENT
 // ═══════════════════════════════════════════════
+const STEPS_PER_MILE = 2485;
+const CAL_PER_MILE   = 100;
+const CAL_PER_STEP   = CAL_PER_MILE / STEPS_PER_MILE; // ~0.04025
+
+let mvMode = 'manual'; // 'manual' | 'steps' | 'miles'
+const WALK_TYPES = ['Indoor Walk','Outdoor Walk'];
+
 function onMvDateChange(){updateBadge('mv-date','mv-date-badge');renderMvLog();}
-function selectMv(el,type){document.querySelectorAll('.mv-btn').forEach(b=>b.classList.remove('sel'));el.classList.add('sel');mvType=type;}
+
+function selectMv(el, type){
+  document.querySelectorAll('.mv-btn').forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel');
+  mvType=type;
+  // show toggle only for walk types
+  const isWalk=WALK_TYPES.includes(type);
+  document.getElementById('walk-mode-toggle').style.display=isWalk?'block':'none';
+  if(!isWalk) setMvMode('manual');
+}
+
+function setMvMode(mode){
+  mvMode=mode;
+  document.querySelectorAll('.mode-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('mode-'+mode+'-btn').classList.add('active');
+  document.getElementById('mv-manual-inputs').style.display=mode==='manual'?'block':'none';
+  document.getElementById('mv-steps-inputs').style.display=mode==='steps'?'block':'none';
+  document.getElementById('mv-miles-inputs').style.display=mode==='miles'?'block':'none';
+}
+
+function calcStepCals(){
+  const steps=parseInt(document.getElementById('mv-steps').value)||0;
+  const miles=(steps/STEPS_PER_MILE);
+  const cals=Math.round(steps*CAL_PER_STEP);
+  document.getElementById('steps-display').textContent=steps?steps.toLocaleString():'—';
+  document.getElementById('steps-miles').textContent=steps?miles.toFixed(2)+' mi':'—';
+  document.getElementById('steps-cals').textContent=steps?cals+' cal':'—';
+}
+
+function calcMileCals(){
+  const miles=parseFloat(document.getElementById('mv-miles').value)||0;
+  const steps=Math.round(miles*STEPS_PER_MILE);
+  const cals=Math.round(miles*CAL_PER_MILE);
+  document.getElementById('miles-display').textContent=miles?miles.toFixed(2)+' mi':'—';
+  document.getElementById('miles-steps').textContent=miles?steps.toLocaleString():'—';
+  document.getElementById('miles-cals').textContent=miles?cals+' cal':'—';
+}
 
 async function renderMvLog(){
   const d=document.getElementById('mv-date').value||todayStr();
@@ -867,11 +952,18 @@ async function renderMvLog(){
   if(!entries.length){container.innerHTML='';return;}
   const total=entries.reduce((a,m)=>a+(m.cal||0),0);
   container.innerHTML=`<div class="card-title" style="margin-top:4px">${d===todayStr()?'Today':fmtDate(d)} · ${total} cal total</div>`
-    +entries.map((m,i)=>`<div class="mv-log-item">
-      <div><div class="mv-log-left">${m.type}</div><div class="mv-log-sub">${m.dur} min</div></div>
-      <div style="display:flex;align-items:center;gap:10px"><span class="mv-log-cal">+${m.cal} cal</span>
-        <button onclick="removeMv(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px">✕</button>
-      </div></div>`).join('');
+    +entries.map((m,i)=>{
+      // build detail line depending on what was logged
+      let detail='';
+      if(m.steps) detail=m.steps.toLocaleString()+' steps · '+Number(m.miles||0).toFixed(2)+' mi';
+      else if(m.miles) detail=Number(m.miles).toFixed(2)+' mi';
+      else if(m.dur) detail=m.dur+' min';
+      return `<div class="mv-log-item">
+        <div><div class="mv-log-left">${m.type}</div><div class="mv-log-sub">${detail}</div></div>
+        <div style="display:flex;align-items:center;gap:10px"><span class="mv-log-cal">+${m.cal} cal</span>
+          <button onclick="removeMv(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px">✕</button>
+        </div></div>`;
+    }).join('');
 }
 
 async function removeMv(idx){
@@ -885,18 +977,45 @@ async function removeMv(idx){
 
 async function saveMv(){
   if(!mvType){toast('Pick an activity first!');return;}
-  const dur=document.getElementById('mv-dur').value;
-  const cal=document.getElementById('mv-cal').value;
-  if(!dur||!cal){toast('Fill in duration and calories');return;}
   const d=document.getElementById('mv-date').value||todayStr();
+  let entry={type:mvType,ts:Date.now()};
+
+  if(mvMode==='steps'){
+    const steps=parseInt(document.getElementById('mv-steps').value);
+    if(!steps){toast('Enter number of steps');return;}
+    const miles=parseFloat((steps/STEPS_PER_MILE).toFixed(3));
+    const cal=Math.round(steps*CAL_PER_STEP);
+    const dur=parseInt(document.getElementById('mv-steps-dur').value)||null;
+    entry={...entry,steps,miles,cal,dur};
+  } else if(mvMode==='miles'){
+    const miles=parseFloat(document.getElementById('mv-miles').value);
+    if(!miles){toast('Enter distance in miles');return;}
+    const steps=Math.round(miles*STEPS_PER_MILE);
+    const cal=Math.round(miles*CAL_PER_MILE);
+    const dur=parseInt(document.getElementById('mv-miles-dur').value)||null;
+    entry={...entry,miles,steps,cal,dur};
+  } else {
+    const dur=document.getElementById('mv-dur').value;
+    const cal=document.getElementById('mv-cal').value;
+    if(!dur||!cal){toast('Fill in duration and calories');return;}
+    entry={...entry,dur:parseInt(dur),cal:parseInt(cal)};
+  }
+
   const {data}=await sb.from('movement').select('entries').eq('user_id',currentUser.id).eq('date',d).maybeSingle();
   const entries=data?data.entries:[];
-  entries.push({type:mvType,dur:parseInt(dur),cal:parseInt(cal),ts:Date.now()});
+  entries.push(entry);
   const ok=await dbUpsert('movement',d,{entries});
   if(ok){
-    document.getElementById('mv-dur').value='';document.getElementById('mv-cal').value='';
-    document.querySelectorAll('.mv-btn').forEach(b=>b.classList.remove('sel'));mvType='';
-    renderMvLog();toast('Activity saved'+(d===todayStr()?'! 🚶':' for '+fmtDate(d)+' 🚶'));
+    // clear inputs
+    ['mv-dur','mv-cal','mv-steps','mv-steps-dur','mv-miles','mv-miles-dur'].forEach(id=>{
+      const el=document.getElementById(id);if(el) el.value='';
+    });
+    calcStepCals();calcMileCals();
+    document.querySelectorAll('.mv-btn').forEach(b=>b.classList.remove('sel'));
+    document.getElementById('walk-mode-toggle').style.display='none';
+    mvType='';setMvMode('manual');
+    renderMvLog();
+    toast('Activity saved'+(d===todayStr()?'! 🚶':' for '+fmtDate(d)+' 🚶'));
   }
 }
 
